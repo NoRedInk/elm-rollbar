@@ -1,17 +1,20 @@
-effect module Rollbar
-    where { command = RollbarCmd }
-    exposing
-        ( Rollbar
-        , scopedRollbar
-        , crash
-        )
+module Rollbar exposing (Level(..), Rollbar, scoped, send)
 
-import Json.Encode as Json
-import Native.Rollbar
+import Http
+import Json.Encode exposing (Value)
 import Task exposing (Task)
 
 
-type ReportType
+type alias Rollbar =
+    { critical : String -> Value -> Task Http.Error ()
+    , error : String -> Value -> Task Http.Error ()
+    , warning : String -> Value -> Task Http.Error ()
+    , info : String -> Value -> Task Http.Error ()
+    , debug : String -> Value -> Task Http.Error ()
+    }
+
+
+type Level
     = Critical
     | Error
     | Warning
@@ -19,7 +22,15 @@ type ReportType
     | Debug
 
 
-toStringReportType : ReportType -> String
+type Token
+    = Token String
+
+
+type Scope
+    = Scope String
+
+
+toStringReportType : Level -> String
 toStringReportType report =
     case report of
         Critical ->
@@ -38,112 +49,45 @@ toStringReportType report =
             "warning"
 
 
--- I believe this is new best practice
--- if you have to wrap a JS value in a type
--- then use Json.Value to signify this
--- prevents it breaking on various built in elm things
-
-
-type RollbarObject
-    = RollbarObject Json.Value
-
-
-type alias Rollbar msg =
-    { critical : String -> Cmd msg
-    , error : String -> Cmd msg
-    , warning : String -> Cmd msg
-    , info : String -> Cmd msg
-    , debug : String -> Cmd msg
+send : Token -> Scope -> Level -> String -> Value -> Task Http.Error ()
+send token scope level message payload =
+    { method = "POST"
+    , headers = [ tokenHeader token ]
+    , url = "https://api.rollbar.com/api/1/item"
+    , body = Http.jsonBody payload
+    , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
+    , timeout = Nothing
+    , withCredentials = False
     }
+        |> Http.request
+        -- TODO retry if rate limited
+        |> Http.toTask
 
 
-{-|
-report to github as critical, then call debug.crash
+tokenHeader : Token -> Http.Header
+tokenHeader (Token token) =
+    Http.header "X-Rollbar-Access-Token" token
+
+
+{-| Return a Rollbar object scoped to a given filename and configured
+to take ExtraInfo for both items above and below the error level.
+
+    rollbar = Rollbar.scoped "Page/Home.elm"
+
+    rollbar.debug "Hitting the hats API." []
+
+    rollbar.error "Unexpected payload from the hats API." [ ("Payload", toString payload) ]
+
 -}
-crash : Rollbar msg -> String -> a
-crash rollbar =
-    Native.Rollbar.crash (Debug.crash) (Native.Rollbar.scopedRollbar rollbar)
-
-
-{-|
-use a scoped rollbar to report a message at the given level
--}
-report : RollbarObject -> ReportType -> String -> Task Never ()
-report rollbar reportType message =
+scoped : Token -> String -> Rollbar
+scoped token scopeStr =
     let
-        type' =
-            toStringReportType reportType
-                |> Json.string
+        scope =
+            Scope scopeStr
     in
-        Native.Rollbar.report rollbar type' message
-
-
-{-|
-return a rollbar object scoped with a given filename
--}
-scopedRollbar : String -> Rollbar msg
-scopedRollbar filename =
-    let
-        rollbar =
-            Native.Rollbar.scopedRollbar filename
-
-        reportEffects =
-            send rollbar
-    in
-        { critical = reportEffects Critical
-        , error = reportEffects Error
-        , warning = reportEffects Warning
-        , info = reportEffects Info
-        , debug = reportEffects Debug
-        }
-
-
-
--- Effects Manager
-
-
-send : RollbarObject -> ReportType -> String -> Cmd msg
-send rollbar reportType message =
-    command (Send rollbar reportType message)
-
-
-type RollbarCmd msg
-    = Send RollbarObject ReportType String
-
-
-cmdMap : (a -> b) -> RollbarCmd a -> RollbarCmd b
-cmdMap _ (Send rollbar reportType message) =
-    Send rollbar reportType message
-
-
-type RollbarState
-    = RollbarState
-
-
-init : Task Never RollbarState
-init =
-    Task.succeed RollbarState
-
-
-type alias RollbarMsg =
-    Never
-
-
-onEffects : Platform.Router msg RollbarMsg -> List (RollbarCmd msg) -> RollbarState -> Task Never RollbarState
-onEffects router cmds state =
-    cmds
-        |> List.map onEffect
-        |> Task.sequence
-        |> Task.map (always RollbarState)
-
-
-onEffect : RollbarCmd msg -> Task Never ()
-onEffect cmd =
-    case cmd of
-        Send rollbar reportType message ->
-            report rollbar reportType message
-
-
-onSelfMsg : Platform.Router msg RollbarMsg -> RollbarMsg -> RollbarState -> Task Never RollbarState
-onSelfMsg router selfMsg state =
-    Task.succeed RollbarState
+    { critical = send token scope Critical
+    , error = send token scope Error
+    , warning = send token scope Warning
+    , info = send token scope Info
+    , debug = send token scope Debug
+    }
