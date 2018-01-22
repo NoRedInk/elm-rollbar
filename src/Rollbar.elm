@@ -6,6 +6,7 @@ module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environm
 import Dict exposing (Dict)
 import Http
 import Json.Encode exposing (Value)
+import Process
 import Random.Pcg as Random
 import Rollbar.Internal exposing (version)
 import Task exposing (Task)
@@ -89,7 +90,7 @@ Arguments:
   - `Token` - The [Rollbar API token](https://rollbar.com/docs/api/#authentication) required to authenticate the request.
   - `Scope` - Scoping messages essentially namespaces them. For example, this might be the name of the page the user was on when the message was sent.
   - `Environment` - e.g. `"production"`, `"development"`, `"staging"`, etc.
-  - `Int` - maximum retry attempts - if the response is that the message was rate limited, try sending again up to this many times. (0 means "do not retry.")
+  - `Int` - maximum retry attempts - if the response is that the message was rate limited, try resending again (once per second) up to this many times. (0 means "do not retry.")
   - `Level` - severity, e.g. `Error`, `Warning`, `Debug`
   - `String` - message, e.g. "Auth server was down when user tried to sign in."
   - `Dict String Value` - arbitrary metadata, e.g. `{"username": "rtfeldman"}`
@@ -138,15 +139,20 @@ sendWithUuid token scope environment maxRetryAttempts level message metadata uui
                 case httpError of
                     Http.BadStatus { status } ->
                         if status.code == 429 then
-                            -- Retry using the same UUID as before.
-                            sendWithUuid token
-                                scope
-                                environment
-                                (maxRetryAttempts - 1)
-                                level
-                                message
-                                metadata
-                                uuid
+                            -- Wait a bit between retries.
+                            Process.sleep retries.msDelayBetweenRetries
+                                |> Task.andThen
+                                    (\() ->
+                                        -- Retry using the same UUID as before.
+                                        sendWithUuid token
+                                            scope
+                                            environment
+                                            (maxRetryAttempts - 1)
+                                            level
+                                            message
+                                            metadata
+                                            uuid
+                                    )
                         else
                             Task.fail httpError
 
@@ -220,7 +226,7 @@ tokenHeader (Token token) =
 [`Environment`](#Environment) and [`Scope`](#Scope) string.
 
 If the HTTP request to Rollbar fails because of an exceeded rate limit (status
-code 429), this will retry the HTTP request up to 5 times.
+code 429), this will retry the HTTP request once per second, up to 60 times.
 
     rollbar = Rollbar.scoped "Page/Home.elm"
 
@@ -237,14 +243,21 @@ scoped token environment scopeStr =
         scope =
             Scope scopeStr
     in
-    { critical = send token scope environment defaultRetryAttempts Critical
-    , error = send token scope environment defaultRetryAttempts Error
-    , warning = send token scope environment defaultRetryAttempts Warning
-    , info = send token scope environment defaultRetryAttempts Info
-    , debug = send token scope environment defaultRetryAttempts Debug
+    { critical = send token scope environment retries.defaultMaxAttempts Critical
+    , error = send token scope environment retries.defaultMaxAttempts Error
+    , warning = send token scope environment retries.defaultMaxAttempts Warning
+    , info = send token scope environment retries.defaultMaxAttempts Info
+    , debug = send token scope environment retries.defaultMaxAttempts Debug
     }
 
 
-defaultRetryAttempts : Int
-defaultRetryAttempts =
-    5
+{-| According to <https://rollbar.com/docs/rate-limits/>
+the default rate limit for all access tokens is 5,000 calls per minute.
+This window resets every minute, so retry after waiting 1 sec, and default to
+retrying up to 60 times.
+-}
+retries : { defaultMaxAttempts : Int, msDelayBetweenRetries : Time }
+retries =
+    { defaultMaxAttempts = 60
+    , msDelayBetweenRetries = 1000
+    }
