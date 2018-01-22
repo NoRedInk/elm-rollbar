@@ -5,11 +5,6 @@ import Json.Encode exposing (Value)
 import Task exposing (Task)
 
 
-version : String
-version =
-    "1.0.0"
-
-
 type alias Rollbar =
     { critical : String -> List ( String, Value ) -> Task Http.Error ()
     , error : String -> List ( String, Value ) -> Task Http.Error ()
