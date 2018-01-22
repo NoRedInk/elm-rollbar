@@ -81,11 +81,15 @@ endpointUrl =
     "https://api.rollbar.com/api/1/item/"
 
 
-{-| Send a message to Rollbar. Arguments:
+{-| Send a message to Rollbar. [`scoped`](#scoped)
+provides a nice wrapper around this.
+
+Arguments:
 
   - `Token` - The [Rollbar API token](https://rollbar.com/docs/api/#authentication) required to authenticate the request.
   - `Scope` - Scoping messages essentially namespaces them. For example, this might be the name of the page the user was on when the message was sent.
   - `Environment` - e.g. `"production"`, `"development"`, `"staging"`, etc.
+  - `Int` - maximum retry attempts - if the response is that the message was rate limited, try sending again up to this many times. (0 means "do not retry.")
   - `Level` - severity, e.g. `Error`, `Warning`, `Debug`
   - `String` - message, e.g. "Auth server was down when user tried to sign in."
   - `Dict String Value` - arbitrary metadata, e.g. `{"username": "rtfeldman"}`
@@ -97,30 +101,64 @@ with the [`Http.Error`](http://package.elm-lang.org/packages/elm-lang/http/lates
 responsible.
 
 -}
-send : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Task Http.Error Uuid
-send token scope environment level message metadata =
+send : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Task Http.Error Uuid
+send token scope environment maxRetryAttempts level message metadata =
     Time.now
-        |> Task.andThen (sendWithTime token scope environment level message metadata)
+        |> Task.andThen
+            (\time ->
+                sendWithUuid token
+                    scope
+                    environment
+                    maxRetryAttempts
+                    level
+                    message
+                    metadata
+                    (uuidFromTime time)
+            )
 
 
-sendWithTime : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Time -> Task Http.Error Uuid
-sendWithTime token scope environment level message metadata time =
+sendWithUuid : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Uuid -> Task Http.Error Uuid
+sendWithUuid token scope environment maxRetryAttempts level message metadata uuid =
     let
-        uuid =
-            uuidFromTime time
+        request : Http.Request ()
+        request =
+            Http.request
+                { method = "POST"
+                , headers = [ tokenHeader token ]
+                , url = endpointUrl
+                , body = toJsonBody token environment level message uuid metadata
+                , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
+                , timeout = Nothing
+                , withCredentials = False
+                }
+
+        retry : Http.Error -> Task Http.Error Uuid
+        retry httpError =
+            if maxRetryAttempts > 0 then
+                case httpError of
+                    Http.BadStatus { status } ->
+                        if status.code == 429 then
+                            -- Retry using the same UUID as before.
+                            sendWithUuid token
+                                scope
+                                environment
+                                (maxRetryAttempts - 1)
+                                level
+                                message
+                                metadata
+                                uuid
+                        else
+                            Task.fail httpError
+
+                    _ ->
+                        Task.fail httpError
+            else
+                Task.fail httpError
     in
-    { method = "POST"
-    , headers = [ tokenHeader token ]
-    , url = endpointUrl
-    , body = toJsonBody token environment level message uuid metadata
-    , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
-    , timeout = Nothing
-    , withCredentials = False
-    }
-        |> Http.request
-        -- TODO retry if rate limited. Status code will be 429; see https://rollbar.com/docs/api/#error-responses
+    request
         |> Http.toTask
         |> Task.map (\() -> uuid)
+        |> Task.onError retry
 
 
 {-| Using the current system time as a random number seed generator, generate a
@@ -178,8 +216,11 @@ tokenHeader (Token token) =
     Http.header "X-Rollbar-Access-Token" token
 
 
-{-| Return a Rollbar object scoped to a given filename and configured
-to take ExtraInfo for both items above and below the error level.
+{-| Return a [`Rollbar`](#Rollbar) record configured with the given
+[`Environment`](#Environment) and [`Scope`](#Scope) string.
+
+If the HTTP request to Rollbar fails because of an exceeded rate limit (status
+code 429), this will retry the HTTP request up to 5 times.
 
     rollbar = Rollbar.scoped "Page/Home.elm"
 
@@ -196,9 +237,14 @@ scoped token environment scopeStr =
         scope =
             Scope scopeStr
     in
-    { critical = send token scope environment Critical
-    , error = send token scope environment Error
-    , warning = send token scope environment Warning
-    , info = send token scope environment Info
-    , debug = send token scope environment Debug
+    { critical = send token scope environment defaultRetryAttempts Critical
+    , error = send token scope environment defaultRetryAttempts Error
+    , warning = send token scope environment defaultRetryAttempts Warning
+    , info = send token scope environment defaultRetryAttempts Info
+    , debug = send token scope environment defaultRetryAttempts Debug
     }
+
+
+defaultRetryAttempts : Int
+defaultRetryAttempts =
+    5
