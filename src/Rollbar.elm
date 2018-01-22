@@ -81,6 +81,22 @@ endpointUrl =
     "https://api.rollbar.com/api/1/item/"
 
 
+{-| Send a message to Rollbar. Arguments:
+
+  - `Token` - The [Rollbar API token](https://rollbar.com/docs/api/#authentication) required to authenticate the request.
+  - `Scope` - Scoping messages essentially namespaces them. For example, this might be the name of the page the user was on when the message was sent.
+  - `Environment` - e.g. `"production"`, `"development"`, `"staging"`, etc.
+  - `Level` - severity, e.g. `Error`, `Warning`, `Debug`
+  - `String` - message, e.g. "Auth server was down when user tried to sign in."
+  - `Dict String Value` - arbitrary metadata, e.g. `{"username": "rtfeldman"}`
+
+If the message was successfully sent to Rollbar, the [`Task`](http://package.elm-lang.org/packages/elm-lang/core/latest/Task#Task)
+succeeds with the [`Uuid`](http://package.elm-lang.org/packages/danyx23/elm-uuid/latest/Uuid#Uuid)
+it generated and sent to Rollbar to identify the message. Otherwise it fails
+with the [`Http.Error`](http://package.elm-lang.org/packages/elm-lang/http/latest/Http#Error)
+responsible.
+
+-}
 send : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Task Http.Error Uuid
 send token scope environment level message metadata =
     Time.now
@@ -102,11 +118,19 @@ sendWithTime token scope environment level message metadata time =
     , withCredentials = False
     }
         |> Http.request
-        -- TODO retry if rate limited
+        -- TODO retry if rate limited. Status code will be 429; see https://rollbar.com/docs/api/#error-responses
         |> Http.toTask
         |> Task.map (\() -> uuid)
 
 
+{-| Using the current system time as a random number seed generator, generate a
+UUID.
+
+TODO: We could theoretically generate the same UUID twice if we tried to send
+two messages in extremely rapid succession. To guard against this, we could
+incorporate other sources of entropy into the random number generation.
+
+-}
 uuidFromTime : Time -> Uuid
 uuidFromTime time =
     time
