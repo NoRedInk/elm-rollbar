@@ -1,5 +1,6 @@
 module Example exposing (main)
 
+import Dict
 import Html exposing (..)
 import Html.Attributes exposing (value)
 import Html.Events exposing (onClick, onInput)
@@ -54,7 +55,7 @@ update msg model =
 
 info : String -> Cmd Msg
 info report =
-    Task.attempt (\_ -> NoOp) (rollbar.info report [])
+    Task.attempt (\_ -> NoOp) (rollbar.info report Dict.empty)
 
 
 json : Json.Encode.Value

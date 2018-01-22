@@ -1,16 +1,24 @@
 module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environment, scope, scoped, send, token)
 
+{-| Send reports to Rollbar.
+-}
+
+import Dict exposing (Dict)
 import Http
 import Json.Encode exposing (Value)
+import Random.Pcg as Random
+import Rollbar.Internal exposing (version)
 import Task exposing (Task)
+import Time exposing (Time)
+import Uuid exposing (Uuid, uuidGenerator)
 
 
 type alias Rollbar =
-    { critical : String -> List ( String, Value ) -> Task Http.Error ()
-    , error : String -> List ( String, Value ) -> Task Http.Error ()
-    , warning : String -> List ( String, Value ) -> Task Http.Error ()
-    , info : String -> List ( String, Value ) -> Task Http.Error ()
-    , debug : String -> List ( String, Value ) -> Task Http.Error ()
+    { critical : String -> Dict String Value -> Task Http.Error Uuid
+    , error : String -> Dict String Value -> Task Http.Error Uuid
+    , warning : String -> Dict String Value -> Task Http.Error Uuid
+    , info : String -> Dict String Value -> Task Http.Error Uuid
+    , debug : String -> Dict String Value -> Task Http.Error Uuid
     }
 
 
@@ -73,7 +81,7 @@ endpointUrl =
     "https://api.rollbar.com/api/1/item/"
 
 
-send : Token -> Scope -> Environment -> Level -> String -> List ( String, Value ) -> Task Http.Error ()
+send : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Task Http.Error Uuid
 send token scope environment level message metadata =
     { method = "POST"
     , headers = [ tokenHeader token ]
@@ -86,9 +94,19 @@ send token scope environment level message metadata =
         |> Http.request
         -- TODO retry if rate limited
         |> Http.toTask
+        |> Task.andThen (\_ -> Task.map uuidFromTime Time.now)
 
 
-toJsonBody : Token -> Environment -> Level -> String -> List ( String, Value ) -> Http.Body
+uuidFromTime : Time -> Uuid
+uuidFromTime time =
+    time
+        |> floor
+        |> Random.initialSeed
+        |> Random.step uuidGenerator
+        |> Tuple.first
+
+
+toJsonBody : Token -> Environment -> Level -> String -> Dict String Value -> Http.Body
 toJsonBody (Token token) (Environment environment) level message metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
     [ ( "access_token", Json.Encode.string token )
@@ -109,7 +127,7 @@ toJsonBody (Token token) (Environment environment) level message metadata =
               , Json.Encode.object
                     [ ( "message"
                       , Json.Encode.object
-                            (( "body", Json.Encode.string message ) :: metadata)
+                            (( "body", Json.Encode.string message ) :: Dict.toList metadata)
                       )
                     ]
               )
@@ -130,9 +148,11 @@ to take ExtraInfo for both items above and below the error level.
 
     rollbar = Rollbar.scoped "Page/Home.elm"
 
-    rollbar.debug "Hitting the hats API." []
+    rollbar.debug "Hitting the hats API." Dict.empty
 
-    rollbar.error "Unexpected payload from the hats API." [ ("Payload", toString payload) ]
+    [ ( "Payload", toString payload ) ]
+        |> Dict.fromList
+        |> rollbar.error "Unexpected payload from the hats API."
 
 -}
 scoped : Token -> Environment -> String -> Rollbar
