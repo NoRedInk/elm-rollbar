@@ -6,7 +6,7 @@
     "source-directories": [
         "src"
     ],
-    "exposed-modules": [],
+    "exposed-modules": ["Rollbar"],
     "native-modules": true,
     "dependencies": {
         "danyx23/elm-uuid": "2.1.1 <= v < 3.0.0",

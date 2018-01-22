@@ -1,6 +1,17 @@
 module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environment, scope, scoped, send, token)
 
 {-| Send reports to Rollbar.
+
+
+## Types
+
+@docs Rollbar, Level, Token, token, Environment, environment, Scope, scope
+
+
+## Types
+
+@docs scoped, send
+
 -}
 
 import Dict exposing (Dict)
@@ -14,6 +25,12 @@ import Time exposing (Time)
 import Uuid exposing (Uuid, uuidGenerator)
 
 
+{-| Functions preapplied with access tokens, scopes, and environments,
+separated by [`Level`](#Level).
+
+Create one using [`scoped`](#scoped).
+
+-}
 type alias Rollbar =
     { critical : String -> Dict String Value -> Task Http.Error Uuid
     , error : String -> Dict String Value -> Task Http.Error Uuid
@@ -23,6 +40,8 @@ type alias Rollbar =
     }
 
 
+{-| Severity levels.
+-}
 type Level
     = Critical
     | Error
@@ -31,55 +50,67 @@ type Level
     | Debug
 
 
+{-| A Rollbar API access token.
+
+Create one using [`token`](#token).
+
+    Rollbar.token "12c99de67a444c229fca100e0967486f"
+
+-}
 type Token
     = Token String
 
 
-token : String -> Token
-token =
-    Token
+{-| A scope, for example ``"login"`.
 
+Create one using [`scope`](#scope).
 
+    Rollbar.scope "login"
+
+-}
 type Scope
     = Scope String
 
 
+{-| Create a [`Scope`](#Scope).
+
+    Rollbar.scope "login"
+
+-}
 scope : String -> Scope
 scope =
     Scope
 
 
+{-| For example, "production", "development", or "staging".
+
+Create one using [`environment`](#environment).
+
+    Rollbar.environment "production"
+
+-}
 type Environment
     = Environment String
 
 
+{-| Create a [`Token`](#token)
+
+    Rollbar.token "12c99de67a444c229fca100e0967486f"
+
+-}
+token : String -> Token
+token =
+    Token
+
+
+{-| Create an [`Environment`](#Environment)
+
+    Rollbar.environment "production"
+
+-}
 environment : String -> Environment
 environment =
     Environment
-
-
-levelToString : Level -> String
-levelToString report =
-    case report of
-        Critical ->
-            "critical"
-
-        Debug ->
-            "debug"
-
-        Error ->
-            "error"
-
-        Info ->
-            "info"
-
-        Warning ->
-            "warning"
-
-
-endpointUrl : String
-endpointUrl =
-    "https://api.rollbar.com/api/1/item/"
 
 
 {-| Send a message to Rollbar. [`scoped`](#scoped)
@@ -116,6 +147,29 @@ send token scope environment maxRetryAttempts level message metadata =
                     metadata
                     (uuidFromTime time)
             )
+
+
+
+-- INTERNAL --
+
+
+levelToString : Level -> String
+levelToString report =
+    case report of
+        Critical ->
+            "critical"
+
+        Debug ->
+            "debug"
+
+        Error ->
+            "error"
+
+        Info ->
+            "info"
+
+        Warning ->
+            "warning"
 
 
 sendWithUuid : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Uuid -> Task Http.Error Uuid
@@ -261,3 +315,8 @@ retries =
     { defaultMaxAttempts = 60
     , msDelayBetweenRetries = 1000
     }
+
+
+endpointUrl : String
+endpointUrl =
+    "https://api.rollbar.com/api/1/item/"
