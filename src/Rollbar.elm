@@ -83,10 +83,20 @@ endpointUrl =
 
 send : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Task Http.Error Uuid
 send token scope environment level message metadata =
+    Time.now
+        |> Task.andThen (sendWithTime token scope environment level message metadata)
+
+
+sendWithTime : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Time -> Task Http.Error Uuid
+sendWithTime token scope environment level message metadata time =
+    let
+        uuid =
+            uuidFromTime time
+    in
     { method = "POST"
     , headers = [ tokenHeader token ]
     , url = endpointUrl
-    , body = toJsonBody token environment level message metadata
+    , body = toJsonBody token environment level message uuid metadata
     , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
     , timeout = Nothing
     , withCredentials = False
@@ -94,7 +104,7 @@ send token scope environment level message metadata =
         |> Http.request
         -- TODO retry if rate limited
         |> Http.toTask
-        |> Task.andThen (\_ -> Task.map uuidFromTime Time.now)
+        |> Task.map (\() -> uuid)
 
 
 uuidFromTime : Time -> Uuid
@@ -106,13 +116,14 @@ uuidFromTime time =
         |> Tuple.first
 
 
-toJsonBody : Token -> Environment -> Level -> String -> Dict String Value -> Http.Body
-toJsonBody (Token token) (Environment environment) level message metadata =
+toJsonBody : Token -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
+toJsonBody (Token token) (Environment environment) level message uuid metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
     [ ( "access_token", Json.Encode.string token )
     , ( "data"
       , Json.Encode.object
             [ ( "environment", Json.Encode.string environment )
+            , ( "uuid", Uuid.encode uuid )
             , ( "notifier"
               , Json.Encode.object
                     [ ( "name", Json.Encode.string "elm-rollbar" )
