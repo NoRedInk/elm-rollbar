@@ -14,12 +14,13 @@ module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environm
 
 -}
 
+import Bitwise
 import Dict exposing (Dict)
+import FNV
 import Http
-import Json.Encode exposing (Value)
+import Json.Encode as Encode exposing (Value)
 import Process
 import Random.Pcg as Random
-import Rollbar.Internal exposing (version)
 import Task exposing (Task)
 import Time exposing (Time)
 import Uuid exposing (Uuid, uuidGenerator)
@@ -136,17 +137,7 @@ responsible.
 send : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Task Http.Error Uuid
 send token scope environment maxRetryAttempts level message metadata =
     Time.now
-        |> Task.andThen
-            (\time ->
-                sendWithUuid token
-                    scope
-                    environment
-                    maxRetryAttempts
-                    level
-                    message
-                    metadata
-                    (uuidFromTime time)
-            )
+        |> Task.andThen (sendWithTime token scope environment maxRetryAttempts level message metadata)
 
 
 
@@ -172,22 +163,35 @@ levelToString report =
             "warning"
 
 
-sendWithUuid : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Uuid -> Task Http.Error Uuid
-sendWithUuid token scope environment maxRetryAttempts level message metadata uuid =
+sendWithTime : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Time -> Task Http.Error Uuid
+sendWithTime token scope environment maxRetryAttempts level message metadata time =
     let
-        request : Http.Request ()
-        request =
-            Http.request
-                { method = "POST"
-                , headers = [ tokenHeader token ]
-                , url = endpointUrl
-                , body = toJsonBody token environment level message uuid metadata
-                , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
-                , timeout = Nothing
-                , withCredentials = False
-                }
+        uuid : Uuid
+        uuid =
+            uuidFrom token scope environment level message metadata time
 
-        retry : Http.Error -> Task Http.Error Uuid
+        body : Http.Body
+        body =
+            toJsonBody token environment level message uuid metadata
+    in
+    { method = "POST"
+    , headers = [ tokenHeader token ]
+    , url = endpointUrl
+    , body = body
+    , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
+    , timeout = Nothing
+    , withCredentials = False
+    }
+        |> Http.request
+        |> Http.toTask
+        |> Task.map (\() -> uuid)
+        |> withRetry maxRetryAttempts
+
+
+withRetry : Int -> Task Http.Error a -> Task Http.Error a
+withRetry maxRetryAttempts task =
+    let
+        retry : Http.Error -> Task Http.Error a
         retry httpError =
             if maxRetryAttempts > 0 then
                 case httpError of
@@ -195,18 +199,7 @@ sendWithUuid token scope environment maxRetryAttempts level message metadata uui
                         if status.code == 429 then
                             -- Wait a bit between retries.
                             Process.sleep retries.msDelayBetweenRetries
-                                |> Task.andThen
-                                    (\() ->
-                                        -- Retry using the same UUID as before.
-                                        sendWithUuid token
-                                            scope
-                                            environment
-                                            (maxRetryAttempts - 1)
-                                            level
-                                            message
-                                            metadata
-                                            uuid
-                                    )
+                                |> Task.andThen (\() -> withRetry (maxRetryAttempts - 1) task)
                         else
                             Task.fail httpError
 
@@ -215,25 +208,41 @@ sendWithUuid token scope environment maxRetryAttempts level message metadata uui
             else
                 Task.fail httpError
     in
-    request
-        |> Http.toTask
-        |> Task.map (\() -> uuid)
-        |> Task.onError retry
+    Task.onError retry task
 
 
 {-| Using the current system time as a random number seed generator, generate a
 UUID.
 
-TODO: We could theoretically generate the same UUID twice if we tried to send
-two messages in extremely rapid succession. To guard against this, we could
-incorporate other sources of entropy into the random number generation.
+We could theoretically generate the same UUID twice if we tried to send
+two messages in extremely rapid succession. To guard against this, we
+incorporate the contents of the message in the random number seed so that the
+only way we could expect the same UUID is if we were sending a duplicate
+message.
 
 -}
-uuidFromTime : Time -> Uuid
-uuidFromTime time =
-    time
-        |> floor
-        |> Random.initialSeed
+uuidFrom : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Time -> Uuid
+uuidFrom (Token token) (Scope scope) (Environment environment) level message metadata time =
+    let
+        hash : Int
+        hash =
+            [ Encode.string (levelToString level)
+            , Encode.string message
+            , Encode.string token
+            , Encode.string scope
+            , Encode.string environment
+            , Dict.toList metadata
+                |> List.map (\( key, value ) -> Encode.list [ Encode.string key, value ])
+                |> Encode.list
+            ]
+                |> Encode.list
+                |> Encode.encode 0
+                |> FNV.hashString
+
+        combinedSeed =
+            Bitwise.xor (floor time) hash
+    in
+    Random.initialSeed combinedSeed
         |> Random.step uuidGenerator
         |> Tuple.first
 
@@ -241,33 +250,33 @@ uuidFromTime time =
 toJsonBody : Token -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
 toJsonBody (Token token) (Environment environment) level message uuid metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
-    [ ( "access_token", Json.Encode.string token )
+    [ ( "access_token", Encode.string token )
     , ( "data"
-      , Json.Encode.object
-            [ ( "environment", Json.Encode.string environment )
+      , Encode.object
+            [ ( "environment", Encode.string environment )
             , ( "uuid", Uuid.encode uuid )
             , ( "notifier"
-              , Json.Encode.object
-                    [ ( "name", Json.Encode.string "elm-rollbar" )
-                    , ( "version", Json.Encode.string version )
+              , Encode.object
+                    [ ( "name", Encode.string "elm-rollbar" )
+                    , ( "version", Encode.string version )
                     ]
               )
-            , ( "level", Json.Encode.string (levelToString level) )
-            , ( "endpoint", Json.Encode.string endpointUrl )
-            , ( "platform", Json.Encode.string "browser" )
-            , ( "language", Json.Encode.string "Elm" )
+            , ( "level", Encode.string (levelToString level) )
+            , ( "endpoint", Encode.string endpointUrl )
+            , ( "platform", Encode.string "browser" )
+            , ( "language", Encode.string "Elm" )
             , ( "body"
-              , Json.Encode.object
+              , Encode.object
                     [ ( "message"
-                      , Json.Encode.object
-                            (( "body", Json.Encode.string message ) :: Dict.toList metadata)
+                      , Encode.object
+                            (( "body", Encode.string message ) :: Dict.toList metadata)
                       )
                     ]
               )
             ]
       )
     ]
-        |> Json.Encode.object
+        |> Encode.object
         |> Http.jsonBody
 
 
@@ -320,3 +329,8 @@ retries =
 endpointUrl : String
 endpointUrl =
     "https://api.rollbar.com/api/1/item/"
+
+
+version : String
+version =
+    "1.0.0"
