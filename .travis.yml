@@ -1,0 +1,6 @@
+addons:
+  apt:
+    packages:
+    - jq
+script:
+  - scripts/verify-notifier-version.sh
