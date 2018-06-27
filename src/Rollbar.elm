@@ -21,6 +21,7 @@ import Http
 import Json.Encode as Encode exposing (Value)
 import Process
 import Random.Pcg as Random
+import Rollbar.Internal
 import Task exposing (Task)
 import Time exposing (Time)
 import Uuid exposing (Uuid, uuidGenerator)
@@ -258,7 +259,7 @@ toJsonBody (Token token) (Environment environment) level message uuid metadata =
             , ( "notifier"
               , Encode.object
                     [ ( "name", Encode.string "elm-rollbar" )
-                    , ( "version", Encode.string version )
+                    , ( "version", Encode.string Rollbar.Internal.version )
                     ]
               )
             , ( "level", Encode.string (levelToString level) )
@@ -329,8 +330,3 @@ retries =
 endpointUrl : String
 endpointUrl =
     "https://api.rollbar.com/api/1/item/"
-
-
-version : String
-version =
-    "1.0.0"
