@@ -1,7 +1,7 @@
 {
     "version": "1.0.0",
     "summary": "Send reports to Rollbar",
-    "repository": "https://github.com/noredink/elm-rollbar.git",
+    "repository": "https://github.com/NoRedInk/elm-rollbar.git",
     "license": "BSD3",
     "source-directories": [
         "src"
