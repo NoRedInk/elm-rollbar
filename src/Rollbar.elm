@@ -21,7 +21,7 @@ import Bitwise
 import Dict exposing (Dict)
 import Http
 import Json.Encode as Encode exposing (Value)
-import Murmur3 as FNV
+import Murmur3
 import Process
 import Random
 import Rollbar.Internal
@@ -66,7 +66,7 @@ type Token
     = Token String
 
 
-{-| A scope, for example \``"login"`.
+{-| A scope, for example `"login"`.
 
 Create one using [`scope`](#scope).
 
@@ -244,7 +244,7 @@ uuidFrom (Token vtoken) (Scope vscope) (Environment venvironment) level message 
             ]
                 |> Encode.list identity
                 |> Encode.encode 0
-                |> FNV.hashString ms
+                |> Murmur3.hashString ms
 
         combinedSeed =
             Bitwise.xor (floor (ms |> toFloat)) hash
