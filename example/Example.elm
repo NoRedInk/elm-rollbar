@@ -1,5 +1,6 @@
 module Example exposing (main)
 
+import Browser
 import Dict
 import Html exposing (..)
 import Html.Attributes exposing (value)
@@ -9,10 +10,15 @@ import Rollbar exposing (Rollbar)
 import Task
 
 
+token : String
+token =
+    "REPLACE ME WITH YOUR TOKEN"
+
+
 rollbar : Rollbar
 rollbar =
     Rollbar.scoped
-        (Rollbar.token "12c99de67a444c229fca100e0967486f")
+        (Rollbar.token token)
         (Rollbar.environment "test")
         "Example"
 
@@ -22,12 +28,14 @@ rollbar =
 
 
 type alias Model =
-    { report : String }
+    { report : String
+    }
 
 
 initialModel : Model
 initialModel =
-    { report = "" }
+    { report = ""
+    }
 
 
 
@@ -79,13 +87,13 @@ view model =
 -- INIT --
 
 
-main : Program Never Model Msg
+main : Program () Model Msg
 main =
-    Html.program
-        { init = init
+    Browser.document
+        { init = \_ -> init
         , subscriptions = \_ -> Sub.none
         , update = update
-        , view = view
+        , view = \model -> { title = "Example", body = [ view model ] }
         }
 
 
