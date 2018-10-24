@@ -1,4 +1,7 @@
-module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environment, scope, scoped, send, token)
+module Rollbar exposing
+    ( Rollbar, Level(..), Token, token, Environment, environment, Scope, scope
+    , scoped, send
+    )
 
 {-| Send reports to Rollbar.
 
@@ -16,14 +19,14 @@ module Rollbar exposing (Environment, Level(..), Rollbar, Scope, Token, environm
 
 import Bitwise
 import Dict exposing (Dict)
-import FNV
 import Http
 import Json.Encode as Encode exposing (Value)
+import Murmur3
 import Process
-import Random.Pcg as Random
+import Random
 import Rollbar.Internal
 import Task exposing (Task)
-import Time exposing (Time)
+import Time exposing (Posix)
 import Uuid exposing (Uuid, uuidGenerator)
 
 
@@ -63,7 +66,7 @@ type Token
     = Token String
 
 
-{-| A scope, for example ``"login"`.
+{-| A scope, for example `"login"`.
 
 Create one using [`scope`](#scope).
 
@@ -136,9 +139,9 @@ responsible.
 
 -}
 send : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Task Http.Error Uuid
-send token scope environment maxRetryAttempts level message metadata =
+send vtoken vscope venvironment maxRetryAttempts level message metadata =
     Time.now
-        |> Task.andThen (sendWithTime token scope environment maxRetryAttempts level message metadata)
+        |> Task.andThen (sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata)
 
 
 
@@ -164,19 +167,19 @@ levelToString report =
             "warning"
 
 
-sendWithTime : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Time -> Task Http.Error Uuid
-sendWithTime token scope environment maxRetryAttempts level message metadata time =
+sendWithTime : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Posix -> Task Http.Error Uuid
+sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata time =
     let
         uuid : Uuid
         uuid =
-            uuidFrom token scope environment level message metadata time
+            uuidFrom vtoken vscope venvironment level message metadata time
 
         body : Http.Body
         body =
-            toJsonBody token environment level message uuid metadata
+            toJsonBody vtoken venvironment level message uuid metadata
     in
     { method = "POST"
-    , headers = [ tokenHeader token ]
+    , headers = [ tokenHeader vtoken ]
     , url = endpointUrl
     , body = body
     , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
@@ -199,13 +202,15 @@ withRetry maxRetryAttempts task =
                     Http.BadStatus { status } ->
                         if status.code == 429 then
                             -- Wait a bit between retries.
-                            Process.sleep retries.msDelayBetweenRetries
+                            Process.sleep (Time.posixToMillis retries.msDelayBetweenRetries |> toFloat)
                                 |> Task.andThen (\() -> withRetry (maxRetryAttempts - 1) task)
+
                         else
                             Task.fail httpError
 
                     _ ->
                         Task.fail httpError
+
             else
                 Task.fail httpError
     in
@@ -222,26 +227,27 @@ only way we could expect the same UUID is if we were sending a duplicate
 message.
 
 -}
-uuidFrom : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Time -> Uuid
-uuidFrom (Token token) (Scope scope) (Environment environment) level message metadata time =
+uuidFrom : Token -> Scope -> Environment -> Level -> String -> Dict String Value -> Posix -> Uuid
+uuidFrom (Token vtoken) (Scope vscope) (Environment venvironment) level message metadata time =
     let
+        ms =
+            Time.posixToMillis time
+
         hash : Int
         hash =
             [ Encode.string (levelToString level)
             , Encode.string message
-            , Encode.string token
-            , Encode.string scope
-            , Encode.string environment
-            , Dict.toList metadata
-                |> List.map (\( key, value ) -> Encode.list [ Encode.string key, value ])
-                |> Encode.list
+            , Encode.string vtoken
+            , Encode.string vscope
+            , Encode.string venvironment
+            , Encode.dict identity identity metadata
             ]
-                |> Encode.list
+                |> Encode.list identity
                 |> Encode.encode 0
-                |> FNV.hashString
+                |> Murmur3.hashString ms
 
         combinedSeed =
-            Bitwise.xor (floor time) hash
+            Bitwise.xor (floor (ms |> toFloat)) hash
     in
     Random.initialSeed combinedSeed
         |> Random.step uuidGenerator
@@ -249,12 +255,12 @@ uuidFrom (Token token) (Scope scope) (Environment environment) level message met
 
 
 toJsonBody : Token -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
-toJsonBody (Token token) (Environment environment) level message uuid metadata =
+toJsonBody (Token vtoken) (Environment venvironment) level message uuid metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
-    [ ( "access_token", Encode.string token )
+    [ ( "access_token", Encode.string vtoken )
     , ( "data"
       , Encode.object
-            [ ( "environment", Encode.string environment )
+            [ ( "environment", Encode.string venvironment )
             , ( "uuid", Uuid.encode uuid )
             , ( "notifier"
               , Encode.object
@@ -282,8 +288,8 @@ toJsonBody (Token token) (Environment environment) level message uuid metadata =
 
 
 tokenHeader : Token -> Http.Header
-tokenHeader (Token token) =
-    Http.header "X-Rollbar-Access-Token" token
+tokenHeader (Token vtoken) =
+    Http.header "X-Rollbar-Access-Token" vtoken
 
 
 {-| Return a [`Rollbar`](#Rollbar) record configured with the given
@@ -302,16 +308,16 @@ code 429), this will retry the HTTP request once per second, up to 60 times.
 
 -}
 scoped : Token -> Environment -> String -> Rollbar
-scoped token environment scopeStr =
+scoped vtoken venvironment scopeStr =
     let
-        scope =
+        vscope =
             Scope scopeStr
     in
-    { critical = send token scope environment retries.defaultMaxAttempts Critical
-    , error = send token scope environment retries.defaultMaxAttempts Error
-    , warning = send token scope environment retries.defaultMaxAttempts Warning
-    , info = send token scope environment retries.defaultMaxAttempts Info
-    , debug = send token scope environment retries.defaultMaxAttempts Debug
+    { critical = send vtoken vscope venvironment retries.defaultMaxAttempts Critical
+    , error = send vtoken vscope venvironment retries.defaultMaxAttempts Error
+    , warning = send vtoken vscope venvironment retries.defaultMaxAttempts Warning
+    , info = send vtoken vscope venvironment retries.defaultMaxAttempts Info
+    , debug = send vtoken vscope venvironment retries.defaultMaxAttempts Debug
     }
 
 
@@ -320,10 +326,10 @@ the default rate limit for all access tokens is 5,000 calls per minute.
 This window resets every minute, so retry after waiting 1 sec, and default to
 retrying up to 60 times.
 -}
-retries : { defaultMaxAttempts : Int, msDelayBetweenRetries : Time }
+retries : { defaultMaxAttempts : Int, msDelayBetweenRetries : Posix }
 retries =
     { defaultMaxAttempts = 60
-    , msDelayBetweenRetries = 1000
+    , msDelayBetweenRetries = Time.millisToPosix 1000
     }
 
 
