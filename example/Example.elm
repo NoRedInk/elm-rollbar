@@ -12,7 +12,10 @@ import Task
 
 token : String
 token =
-    "REPLACE ME WITH YOUR TOKEN"
+    -- This is a demo token provide by Rollbar for its demo user
+    -- You view and verify the result by visiting https://rollbar.com/demo/demo/
+    -- This will log you in as the demo user, if you are not already logged in.
+    "3cda8fbafbfe4a6599d1954b1f1a246e"
 
 
 rollbar : Rollbar
