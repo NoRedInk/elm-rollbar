@@ -182,12 +182,10 @@ sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata 
     , headers = [ tokenHeader vtoken ]
     , url = endpointUrl
     , body = body
-    , expect = Http.expectStringResponse (\_ -> Ok ()) -- TODO
+    , resolver = Http.stringResolver (\_ -> Ok ()) -- TODO
     , timeout = Nothing
-    , withCredentials = False
     }
-        |> Http.request
-        |> Http.toTask
+        |> Http.task
         |> Task.map (\() -> uuid)
         |> withRetry maxRetryAttempts
 
@@ -199,8 +197,8 @@ withRetry maxRetryAttempts task =
         retry httpError =
             if maxRetryAttempts > 0 then
                 case httpError of
-                    Http.BadStatus { status } ->
-                        if status.code == 429 then
+                    Http.BadStatus statusCode ->
+                        if statusCode == 429 then
                             -- Wait a bit between retries.
                             Process.sleep (Time.posixToMillis retries.msDelayBetweenRetries |> toFloat)
                                 |> Task.andThen (\() -> withRetry (maxRetryAttempts - 1) task)
