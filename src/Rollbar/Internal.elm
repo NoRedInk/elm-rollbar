@@ -8,4 +8,4 @@ module Rollbar.Internal exposing (version)
 -}
 version : String
 version =
-    "1.0.1"
+    "2.0.0"
