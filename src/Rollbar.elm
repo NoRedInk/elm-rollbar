@@ -1,5 +1,5 @@
 module Rollbar exposing
-    ( Rollbar, Level(..), Token, token, Environment, environment, Scope, scope
+    ( Rollbar, Level(..), Token, token, Environment, environment, Scope, scope, CodeVersion, codeVersion
     , scoped, send
     )
 
@@ -8,7 +8,7 @@ module Rollbar exposing
 
 ## Types
 
-@docs Rollbar, Level, Token, token, Environment, environment, Scope, scope
+@docs Rollbar, Level, Token, token, Environment, environment, Scope, scope, CodeVersion, codeVersion
 
 
 ## Types
@@ -77,6 +77,17 @@ type Scope
     = Scope String
 
 
+{-| A code version, for example - a git commit hash.
+
+Create one using [`codeVersion`](#codeVersion).
+
+    Rollbar.codeVersion "24dcf3a9a9cf1a5e2ea319018644a68f4743a731"
+
+-}
+type CodeVersion
+    = CodeVersion String
+
+
 {-| Create a [`Scope`](#Scope).
 
     Rollbar.scope "login"
@@ -85,6 +96,16 @@ type Scope
 scope : String -> Scope
 scope =
     Scope
+
+
+{-| Create a [`CodeVersion`](#CodeVersion).
+
+    Rollbar.codeVersion "24dcf3a9a9cf1a5e2ea319018644a68f4743a731"
+
+-}
+codeVersion : String -> CodeVersion
+codeVersion =
+    CodeVersion
 
 
 {-| For example, "production", "development", or "staging".
@@ -138,10 +159,10 @@ with the [`Http.Error`](http://package.elm-lang.org/packages/elm-lang/http/lates
 responsible.
 
 -}
-send : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Task Http.Error Uuid
-send vtoken vscope venvironment maxRetryAttempts level message metadata =
+send : Token -> CodeVersion -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Task Http.Error Uuid
+send vtoken vcodeVersion vscope venvironment maxRetryAttempts level message metadata =
     Time.now
-        |> Task.andThen (sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata)
+        |> Task.andThen (sendWithTime vtoken vcodeVersion vscope venvironment maxRetryAttempts level message metadata)
 
 
 
@@ -167,8 +188,8 @@ levelToString report =
             "warning"
 
 
-sendWithTime : Token -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Posix -> Task Http.Error Uuid
-sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata time =
+sendWithTime : Token -> CodeVersion -> Scope -> Environment -> Int -> Level -> String -> Dict String Value -> Posix -> Task Http.Error Uuid
+sendWithTime vtoken vcodeVersion vscope venvironment maxRetryAttempts level message metadata time =
     let
         uuid : Uuid
         uuid =
@@ -176,7 +197,7 @@ sendWithTime vtoken vscope venvironment maxRetryAttempts level message metadata 
 
         body : Http.Body
         body =
-            toJsonBody vtoken venvironment level message uuid metadata
+            toJsonBody vtoken vcodeVersion venvironment level message uuid metadata
     in
     { method = "POST"
     , headers = [ tokenHeader vtoken ]
@@ -252,14 +273,22 @@ uuidFrom (Token vtoken) (Scope vscope) (Environment venvironment) level message 
         |> Tuple.first
 
 
-toJsonBody : Token -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
-toJsonBody (Token vtoken) (Environment venvironment) level message uuid metadata =
+toJsonBody : Token -> CodeVersion -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
+toJsonBody (Token vtoken) (CodeVersion vcodeVersion) (Environment venvironment) level message uuid metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
     [ ( "access_token", Encode.string vtoken )
     , ( "data"
       , Encode.object
             [ ( "environment", Encode.string venvironment )
             , ( "uuid", Uuid.encode uuid )
+            , ( "client"
+              , Encode.object
+                    [ ( "elm"
+                      , Encode.object
+                            [ ( "code_version", Encode.string vcodeVersion ) ]
+                      )
+                    ]
+              )
             , ( "notifier"
               , Encode.object
                     [ ( "name", Encode.string "elm-rollbar" )
@@ -305,17 +334,17 @@ code 429), this will retry the HTTP request once per second, up to 60 times.
         |> rollbar.error "Unexpected payload from the hats API."
 
 -}
-scoped : Token -> Environment -> String -> Rollbar
-scoped vtoken venvironment scopeStr =
+scoped : Token -> CodeVersion -> Environment -> String -> Rollbar
+scoped vtoken vcodeVersion venvironment scopeStr =
     let
         vscope =
             Scope scopeStr
     in
-    { critical = send vtoken vscope venvironment retries.defaultMaxAttempts Critical
-    , error = send vtoken vscope venvironment retries.defaultMaxAttempts Error
-    , warning = send vtoken vscope venvironment retries.defaultMaxAttempts Warning
-    , info = send vtoken vscope venvironment retries.defaultMaxAttempts Info
-    , debug = send vtoken vscope venvironment retries.defaultMaxAttempts Debug
+    { critical = send vtoken vcodeVersion vscope venvironment retries.defaultMaxAttempts Critical
+    , error = send vtoken vcodeVersion vscope venvironment retries.defaultMaxAttempts Error
+    , warning = send vtoken vcodeVersion vscope venvironment retries.defaultMaxAttempts Warning
+    , info = send vtoken vcodeVersion vscope venvironment retries.defaultMaxAttempts Info
+    , debug = send vtoken vcodeVersion vscope venvironment retries.defaultMaxAttempts Debug
     }
 
 
