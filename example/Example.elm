@@ -22,6 +22,7 @@ rollbar : Rollbar
 rollbar =
     Rollbar.scoped
         (Rollbar.token token)
+        (Rollbar.codeVersion "0.0.1")
         (Rollbar.environment "test")
         "Example"
 

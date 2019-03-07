@@ -197,7 +197,7 @@ sendWithTime vtoken vcodeVersion vscope venvironment maxRetryAttempts level mess
 
         body : Http.Body
         body =
-            toJsonBody vtoken vcodeVersion venvironment level message uuid metadata
+            toJsonBody vtoken vscope vcodeVersion venvironment level message uuid metadata
     in
     { method = "POST"
     , headers = [ tokenHeader vtoken ]
@@ -273,13 +273,14 @@ uuidFrom (Token vtoken) (Scope vscope) (Environment venvironment) level message 
         |> Tuple.first
 
 
-toJsonBody : Token -> CodeVersion -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
-toJsonBody (Token vtoken) (CodeVersion vcodeVersion) (Environment venvironment) level message uuid metadata =
+toJsonBody : Token -> Scope -> CodeVersion -> Environment -> Level -> String -> Uuid -> Dict String Value -> Http.Body
+toJsonBody (Token vtoken) (Scope vscope) (CodeVersion vcodeVersion) (Environment venvironment) level message uuid metadata =
     -- See https://rollbar.com/docs/api/items_post/ for schema
     [ ( "access_token", Encode.string vtoken )
     , ( "data"
       , Encode.object
             [ ( "environment", Encode.string venvironment )
+            , ( "context", Encode.string vscope )
             , ( "uuid", Uuid.encode uuid )
             , ( "client"
               , Encode.object
