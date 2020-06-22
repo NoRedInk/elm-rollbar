@@ -1,7 +1,4 @@
-# elm-rollbar ![Build Status](https://travis-ci.org/NoRedInk/elm-rollbar.svg?branch=master)
+# elm-trackjs ![Build Status](https://travis-ci.org/scrive/elm-trackjs.svg?branch=master)
 
-Send reports to Rollbar.
-
-### Development
-
-- Before publishing changes you must make sure that the value of `Rollbar.Internal.version` matches the `version` in elm.json. The script `scripts/verify-notifier-version.sh` will check this for you and also fail the Travis build.
+**Work in Progress:** This project is a fork of `elm-rollbar`, with the
+intention of adapting it to work with TrackJS.
