@@ -1,4 +1,4 @@
-module Rollbar.Internal exposing (version)
+module TrackJS.Internal exposing (version)
 
 {-| This module should not be publicly exposed.
 -}
@@ -8,4 +8,4 @@ module Rollbar.Internal exposing (version)
 -}
 version : String
 version =
-    "2.0.0"
+    "1.0.0"

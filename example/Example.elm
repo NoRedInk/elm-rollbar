@@ -6,7 +6,7 @@ import Html exposing (..)
 import Html.Attributes exposing (value)
 import Html.Events exposing (onClick, onInput)
 import Json.Encode
-import Rollbar exposing (Rollbar)
+import TrackJS exposing (Rollbar)
 import Task
 
 
@@ -20,10 +20,10 @@ token =
 
 rollbar : Rollbar
 rollbar =
-    Rollbar.scoped
-        (Rollbar.token token)
-        (Rollbar.codeVersion "0.0.1")
-        (Rollbar.environment "test")
+    TrackJS.scoped
+        (TrackJS.token token)
+        (TrackJS.codeVersion "0.0.1")
+        (TrackJS.environment "test")
         "Example"
 
 

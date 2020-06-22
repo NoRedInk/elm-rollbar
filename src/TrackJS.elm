@@ -1,4 +1,4 @@
-module Rollbar exposing
+module TrackJS exposing
     ( Rollbar, Level(..), Token, token, Environment, environment, Scope, scope, CodeVersion, codeVersion
     , scoped, send
     )
