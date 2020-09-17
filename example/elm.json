@@ -7,7 +7,6 @@
     "elm-version": "0.19.0",
     "dependencies": {
         "direct": {
-            "Skinney/murmur3": "2.0.8",
             "danyx23/elm-uuid": "2.1.2",
             "elm/browser": "1.0.1",
             "elm/core": "1.0.2",
